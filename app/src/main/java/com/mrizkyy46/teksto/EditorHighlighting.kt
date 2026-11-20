@@ -53,7 +53,7 @@ internal class EditorHighlighting(
                 }
                 highlighted.addStyle(SpanStyle(color = color), token.range.first, token.range.last + 1)
             }
-            Syntax.Xml -> for (token in xmlTokens.findAll(text.text)) {
+            Syntax.Html, Syntax.Xml -> for (token in xmlTokens.findAll(text.text)) {
                 val content = token.value
                 val color = when {
                     content.startsWith("<!--") -> Comment

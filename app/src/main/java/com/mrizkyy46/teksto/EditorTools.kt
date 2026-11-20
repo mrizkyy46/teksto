@@ -27,12 +27,23 @@ internal fun lineIndex(starts: List<Int>, offset: Int): Int {
 }
 
 internal enum class Syntax(val label: String) {
-    Plain("Plain text"), Json("JSON"), Markdown("Markdown"), Xml("XML");
+    Plain("Plain text"), Json("JSON"), Markdown("Markdown"), Html("HTML"), Xml("XML");
+
+    val supportsFormatting get() = this == Markdown || this == Html
+    val supportsPreview get() = supportsFormatting || this == Json
+
+    fun suggestedFileName(name: String): String {
+        if (!supportsFormatting || fromName(name) == this) return name
+        val base = name.substringBeforeLast('.').ifEmpty { name }
+        val extension = if (this == Markdown) "md" else "html"
+        return "$base.$extension"
+    }
 
     companion object {
         fun fromName(name: String): Syntax = when (name.substringAfterLast('.').lowercase()) {
             "json" -> Json
             "md", "markdown" -> Markdown
+            "html", "htm" -> Html
             "xml" -> Xml
             else -> Plain
         }

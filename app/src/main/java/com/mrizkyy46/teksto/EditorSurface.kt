@@ -25,6 +25,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
@@ -62,6 +64,7 @@ internal fun EditorSurface(
     onValueChange: (TextFieldValue) -> Unit,
     onUndo: () -> Unit,
     onRedo: () -> Unit,
+    focusRequester: FocusRequester,
     modifier: Modifier = Modifier,
 ) {
     val vertical = rememberScrollState()
@@ -134,6 +137,7 @@ internal fun EditorSurface(
                         value = value,
                         onValueChange = onValueChange,
                         modifier = Modifier.widthIn(min = editorWidth)
+                            .focusRequester(focusRequester)
                             .semantics { contentDescription = "Document editor" }
                             .onPreviewKeyEvent { event ->
                                 if (event.type != KeyEventType.KeyDown || !event.isCtrlPressed) {

@@ -32,13 +32,16 @@ import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.FolderOpen
+import androidx.compose.material.icons.outlined.FormatPaint
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.Save
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -78,10 +81,12 @@ import kotlin.math.roundToInt
 internal fun EditorToolbar(
     document: EditorDocument,
     searchOpen: Boolean,
+    previewOpen: Boolean,
     fileActionsEnabled: Boolean,
     onMenu: () -> Unit,
     onSave: () -> Unit,
     onSearch: () -> Unit,
+    onPreview: () -> Unit,
 ) {
     Row(
         Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 4.dp),
@@ -99,8 +104,18 @@ internal fun EditorToolbar(
             )
         }
         IconButton(onClick = onSave, enabled = fileActionsEnabled) { Icon(Icons.Outlined.Save, "Save file") }
-        IconToggleButton(checked = searchOpen, onCheckedChange = { onSearch() }) {
-            Icon(Icons.Outlined.Search, "Find", tint = if (searchOpen) EditorAccent else EditorInk)
+        val searchActive = searchOpen && !previewOpen
+        IconToggleButton(checked = searchActive, onCheckedChange = { onSearch() }) {
+            Icon(Icons.Outlined.Search, "Find", tint = if (searchActive) EditorAccent else EditorInk)
+        }
+        if (document.syntax.supportsPreview) {
+            IconToggleButton(checked = previewOpen, onCheckedChange = { onPreview() }) {
+                Icon(
+                    if (previewOpen) Icons.Outlined.Edit else Icons.Outlined.Visibility,
+                    if (previewOpen) "Edit source" else "Show preview",
+                    tint = if (previewOpen) EditorAccent else EditorInk,
+                )
+            }
         }
     }
 }
@@ -152,9 +167,11 @@ internal fun EditorTabs(
 internal fun EditingControls(
     document: EditorDocument,
     wordWrap: Boolean,
+    formattingOpen: Boolean,
     onUndo: () -> Unit,
     onRedo: () -> Unit,
     onWrap: () -> Unit,
+    onFormatting: () -> Unit,
     onSyntax: (Syntax?) -> Unit,
 ) {
     var syntaxMenu by remember { mutableStateOf(false) }
@@ -170,6 +187,9 @@ internal fun EditingControls(
         }
         IconToggleButton(checked = wordWrap, onCheckedChange = { onWrap() }) {
             Icon(Icons.AutoMirrored.Outlined.WrapText, "Word wrap", tint = if (wordWrap) EditorAccent else EditorMuted)
+        }
+        IconToggleButton(checked = formattingOpen, onCheckedChange = { onFormatting() }) {
+            Icon(Icons.Outlined.FormatPaint, "Formatting toolbar", tint = if (formattingOpen) EditorAccent else EditorMuted)
         }
         Spacer(Modifier.weight(1f))
         Box {

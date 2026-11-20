@@ -38,9 +38,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.TextRange
@@ -137,6 +139,9 @@ private fun EditorApp(workspace: EditorWorkspace) {
         }
 
         val current = workspace.active
+        var previewRequested by rememberSaveable(current.id) { mutableStateOf(false) }
+        val previewOpen = previewRequested && current.syntax.supportsPreview
+        BackHandler(previewOpen) { previewRequested = false }
         BackHandler(drawer.isOpen) { scope.launch { drawer.close() } }
         ModalNavigationDrawer(
             drawerState = drawer,
@@ -169,6 +174,7 @@ private fun EditorApp(workspace: EditorWorkspace) {
                         scope.launch { drawer.close() }
                     },
                     onGoToLine = {
+                        previewRequested = false
                         showLineDialog = true
                         scope.launch { drawer.close() }
                     },
@@ -193,6 +199,7 @@ private fun EditorApp(workspace: EditorWorkspace) {
                         EditorToolbar(
                             document = current,
                             searchOpen = showSearch,
+                            previewOpen = previewOpen,
                             fileActionsEnabled = fileActionsEnabled,
                             onMenu = {
                                 focus.clearFocus()
@@ -200,8 +207,13 @@ private fun EditorApp(workspace: EditorWorkspace) {
                             },
                             onSave = { save(current) },
                             onSearch = {
-                                showSearch = !showSearch
+                                showSearch = previewOpen || !showSearch
+                                previewRequested = false
                                 if (!showSearch) focus.clearFocus()
+                            },
+                            onPreview = {
+                                focus.clearFocus()
+                                previewRequested = !previewOpen
                             },
                         )
                         EditorTabs(
@@ -219,9 +231,11 @@ private fun EditorApp(workspace: EditorWorkspace) {
                             DocumentEditor(
                                 document = current,
                                 workspace = workspace,
+                                previewOpen = previewOpen,
                                 showSearch = showSearch,
                                 showLineDialog = showLineDialog,
                                 jsonAction = jsonAction,
+                                onEditSource = { previewRequested = false },
                                 onShowLineDialog = { showLineDialog = true },
                                 onDismissLineDialog = { showLineDialog = false },
                                 onJsonHandled = { jsonAction = null },
@@ -261,7 +275,7 @@ private fun EditorApp(workspace: EditorWorkspace) {
         }
         workspace.documents.firstOrNull { it.id == namingTab }?.let { document ->
             SaveNameDialog(
-                document.name,
+                document.syntax.suggestedFileName(document.name),
                 onClose = {
                     namingTab = -1
                     pendingCloseAfterSave = false
@@ -299,9 +313,11 @@ private fun EditorApp(workspace: EditorWorkspace) {
 private fun DocumentEditor(
     document: EditorDocument,
     workspace: EditorWorkspace,
+    previewOpen: Boolean,
     showSearch: Boolean,
     showLineDialog: Boolean,
     jsonAction: Boolean?,
+    onEditSource: () -> Unit,
     onShowLineDialog: () -> Unit,
     onDismissLineDialog: () -> Unit,
     onJsonHandled: () -> Unit,
@@ -310,6 +326,10 @@ private fun DocumentEditor(
 ) {
     val value = document.value
     val starts = remember(value.text) { lineStarts(value.text) }
+    val editorFocus = remember { FocusRequester() }
+    val editorState = rememberSaveableStateHolder()
+    var formattingVisibility by rememberSaveable { mutableStateOf<Boolean?>(null) }
+    val formattingOpen = formattingVisibility ?: document.syntax.supportsFormatting
     var query by rememberSaveable { mutableStateOf("") }
     var replacement by rememberSaveable { mutableStateOf("") }
     var matchAnchor by rememberSaveable { mutableIntStateOf(-1) }
@@ -351,6 +371,13 @@ private fun DocumentEditor(
         jump = EditorJump(document.value.selection.end)
     }
 
+    fun applyFormatting(transform: (TextFieldValue) -> TextFieldValue) {
+        val formatted = transform(document.value)
+        workspace.edit(document, formatted, atomic = true)
+        jump = EditorJump(formatted.selection.end)
+        editorFocus.requestFocus()
+    }
+
     LaunchedEffect(jsonAction) {
         if (jsonAction != null) {
             try {
@@ -372,18 +399,35 @@ private fun DocumentEditor(
         }
     }
 
-    Column(modifier) {
+    if (previewOpen) {
+        DocumentPreview(document.syntax, value.text, workspace.settings.fontSize, modifier)
+    } else Column(modifier) {
         EditingControls(
             document = document,
             wordWrap = workspace.settings.wordWrap,
+            formattingOpen = formattingOpen,
             onUndo = ::undo,
             onRedo = ::redo,
             onWrap = {
                 workspace.updateSettings(workspace.settings.copy(wordWrap = !workspace.settings.wordWrap))
                 jump = EditorJump(document.value.selection.end)
             },
+            onFormatting = { formattingVisibility = !formattingOpen },
             onSyntax = { workspace.setSyntax(document, it) },
         )
+        if (formattingOpen) {
+            FormattingToolbar(
+                syntax = document.syntax,
+                onUseMarkdown = { workspace.setSyntax(document, Syntax.Markdown) },
+                onInlineFormat = { format -> applyFormatting { it.toggleInlineFormat(document.syntax, format) } },
+                onFontSize = { size -> applyFormatting { it.setFontSize(document.syntax, size) } },
+                onFontColor = { color -> applyFormatting { it.setFontColor(document.syntax, color) } },
+                onIndent = { indent ->
+                    val width = if (document.syntax == Syntax.Markdown) 2 else 4
+                    applyFormatting { it.changeIndent(indent, width) }
+                },
+            )
+        }
         if (showSearch) {
             SearchPanel(
                 query = query,
@@ -422,18 +466,21 @@ private fun DocumentEditor(
                 },
             )
         }
-        EditorSurface(
-            value = value,
-            settings = workspace.settings,
-            starts = starts,
-            transformation = transformation,
-            jump = jump,
-            onJumpHandled = { if (jump === it) jump = null },
-            onValueChange = { workspace.edit(document, it) },
-            onUndo = ::undo,
-            onRedo = ::redo,
-            modifier = Modifier.weight(1f),
-        )
+        editorState.SaveableStateProvider("source") {
+            EditorSurface(
+                value = value,
+                settings = workspace.settings,
+                starts = starts,
+                transformation = transformation,
+                jump = jump,
+                onJumpHandled = { if (jump === it) jump = null },
+                onValueChange = { workspace.edit(document, it) },
+                onUndo = ::undo,
+                onRedo = ::redo,
+                focusRequester = editorFocus,
+                modifier = Modifier.weight(1f),
+            )
+        }
         EditorStatus(document, starts, onShowLineDialog)
     }
 
@@ -453,6 +500,7 @@ private fun DocumentEditor(
             confirmButton = {
                 TextButton(onClick = {
                     jsonError = null
+                    onEditSource()
                     moveCursor(offset)
                 }) { Text("Go to error") }
             },

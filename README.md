@@ -10,7 +10,9 @@ Teksto adalah editor teks untuk Android yang dibuat dengan Kotlin, Jetpack Compo
 - Temukan teks di dokumen aktif dengan sorotan, penghitung hasil, serta tombol sebelum dan sesudah. Gunakan **Replace one** atau **Replace all** untuk mengganti teks.
 - Urungkan atau ulangi perubahan di tiap tab. **Replace all** dapat diurungkan dalam satu langkah.
 - Gunakan editor bertema gelap dengan nomor baris, font monospace, ukuran teks 11 hingga 22 sp, **Word wrap**, dan **Go to line**.
-- Tampilkan penyorotan sintaks JSON, Markdown, dan XML. Gunakan **Validate JSON** atau **Format JSON** dari menu samping.
+- Tampilkan penyorotan sintaks JSON, Markdown, HTML, dan XML. Gunakan **Validate JSON** atau **Format JSON** dari menu samping.
+- Ketuk ikon pratinjau untuk melihat hasil render Markdown dan HTML atau tampilan JSON yang dirapikan. Pratinjau HTML dan Markdown memakai konten setempat dengan JavaScript dan akses jaringan dinonaktifkan.
+- Gunakan bilah pemformatan untuk menambahkan tebal, miring, garis bawah, coret, ukuran, dan warna teks di Markdown atau HTML. Kontrol indentasi juga tersedia untuk teks biasa.
 
 Teksto menyimpan draf pemulihan di penyimpanan aplikasi. Ketuk **Save** untuk menulis perubahan ke berkas yang sedang diedit. Teksto memuat seluruh isi berkas ke memori, sehingga berkas yang sangat besar dapat menggunakan banyak RAM.
 
