@@ -399,6 +399,20 @@ private fun DocumentEditor(
         }
     }
 
+    val formattingToolbar: @Composable () -> Unit = {
+        FormattingToolbar(
+            syntax = document.syntax,
+            onUseMarkdown = { workspace.setSyntax(document, Syntax.Markdown) },
+            onInlineFormat = { format -> applyFormatting { it.toggleInlineFormat(document.syntax, format) } },
+            onFontSize = { size -> applyFormatting { it.setFontSize(document.syntax, size) } },
+            onFontColor = { color -> applyFormatting { it.setFontColor(document.syntax, color) } },
+            onIndent = { indent ->
+                val width = if (document.syntax == Syntax.Markdown) 2 else 4
+                applyFormatting { it.changeIndent(indent, width) }
+            },
+        )
+    }
+    val toolbarPosition = workspace.settings.formattingToolbarPosition
     if (previewOpen) {
         DocumentPreview(document.syntax, value.text, workspace.settings.fontSize, modifier)
     } else Column(modifier) {
@@ -415,19 +429,7 @@ private fun DocumentEditor(
             onFormatting = { formattingVisibility = !formattingOpen },
             onSyntax = { workspace.setSyntax(document, it) },
         )
-        if (formattingOpen) {
-            FormattingToolbar(
-                syntax = document.syntax,
-                onUseMarkdown = { workspace.setSyntax(document, Syntax.Markdown) },
-                onInlineFormat = { format -> applyFormatting { it.toggleInlineFormat(document.syntax, format) } },
-                onFontSize = { size -> applyFormatting { it.setFontSize(document.syntax, size) } },
-                onFontColor = { color -> applyFormatting { it.setFontColor(document.syntax, color) } },
-                onIndent = { indent ->
-                    val width = if (document.syntax == Syntax.Markdown) 2 else 4
-                    applyFormatting { it.changeIndent(indent, width) }
-                },
-            )
-        }
+        if (formattingOpen && toolbarPosition == FormattingToolbarPosition.Top) formattingToolbar()
         if (showSearch) {
             SearchPanel(
                 query = query,
@@ -481,6 +483,7 @@ private fun DocumentEditor(
                 modifier = Modifier.weight(1f),
             )
         }
+        if (formattingOpen && toolbarPosition == FormattingToolbarPosition.Bottom) formattingToolbar()
         EditorStatus(document, starts, onShowLineDialog)
     }
 

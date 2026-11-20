@@ -110,7 +110,13 @@ internal class EditorDocument(
 
 internal data class RecentFile(val uri: Uri, val name: String)
 
-internal data class EditorSettings(val fontSize: Int = 14, val wordWrap: Boolean = false)
+internal enum class FormattingToolbarPosition { Top, Bottom }
+
+internal data class EditorSettings(
+    val fontSize: Int = 14,
+    val wordWrap: Boolean = false,
+    val formattingToolbarPosition: FormattingToolbarPosition = FormattingToolbarPosition.Bottom,
+)
 
 internal class EditorWorkspace(application: Application) : AndroidViewModel(application) {
     private val resolver = application.contentResolver

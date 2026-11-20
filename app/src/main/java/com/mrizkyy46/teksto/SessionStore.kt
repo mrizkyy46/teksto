@@ -58,11 +58,17 @@ internal class SessionStore(directory: File) {
             )
         }
         val recents = root.getJSONArray("recent")
+        val toolbarPosition = root.optString("formattingToolbarPosition")
         return SessionSnapshot(
             documents,
             root.getInt("activeId"),
             root.getInt("nextId"),
-            EditorSettings(root.optInt("fontSize", 14).coerceIn(11, 22), root.optBoolean("wordWrap")),
+            EditorSettings(
+                fontSize = root.optInt("fontSize", 14).coerceIn(11, 22),
+                wordWrap = root.optBoolean("wordWrap"),
+                formattingToolbarPosition = FormattingToolbarPosition.entries.firstOrNull { it.name == toolbarPosition }
+                    ?: FormattingToolbarPosition.Bottom,
+            ),
             List(recents.length()) { index ->
                 val entry = recents.getJSONObject(index)
                 RecentFile(Uri.parse(entry.getString("uri")), entry.getString("name"))
@@ -94,6 +100,7 @@ internal class SessionStore(directory: File) {
             .put("nextId", session.nextId)
             .put("fontSize", session.settings.fontSize)
             .put("wordWrap", session.settings.wordWrap)
+            .put("formattingToolbarPosition", session.settings.formattingToolbarPosition.name)
             .put("recent", recents)
         val stream = file.startWrite()
         try {

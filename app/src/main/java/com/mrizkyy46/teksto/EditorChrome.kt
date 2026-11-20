@@ -18,8 +18,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Redo
 import androidx.compose.material.icons.automirrored.outlined.ShortText
@@ -45,6 +48,7 @@ import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -430,7 +434,7 @@ internal fun SettingsDialog(settings: EditorSettings, onChange: (EditorSettings)
         onDismissRequest = onClose,
         title = { Text("Editor settings") },
         text = {
-            Column {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
                 Text("Font size: ${settings.fontSize} sp")
                 Slider(
                     value = settings.fontSize.toFloat(),
@@ -441,6 +445,17 @@ internal fun SettingsDialog(settings: EditorSettings, onChange: (EditorSettings)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Word wrap", Modifier.weight(1f))
                     Switch(checked = settings.wordWrap, onCheckedChange = { onChange(settings.copy(wordWrap = it)) })
+                }
+                Spacer(Modifier.height(8.dp))
+                Text("Formatting toolbar position")
+                Row(Modifier.selectableGroup(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    for (position in FormattingToolbarPosition.entries) {
+                        FilterChip(
+                            selected = settings.formattingToolbarPosition == position,
+                            onClick = { onChange(settings.copy(formattingToolbarPosition = position)) },
+                            label = { Text(position.name) },
+                        )
+                    }
                 }
             }
         },
