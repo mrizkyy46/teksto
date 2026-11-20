@@ -1,121 +1,462 @@
 package com.mrizkyy46.teksto
 
-import android.net.Uri
+import android.app.Activity
+import android.content.Intent
 import android.os.Bundle
+import android.webkit.MimeTypeMap
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.setContent
+import androidx.activity.SystemBarStyle
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.*
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
-import androidx.compose.ui.*
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.rememberDrawerState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.*
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.lifecycle.ViewModelProvider
+import kotlinx.coroutines.launch
 
-private val Bg = Color(0xFF101319)
-private val Surface = Color(0xFF191E27)
-private val Accent = Color(0xFF9DB7FF)
-private val Muted = Color(0xFF8F9AAC)
-private data class Doc(val id: Int, val name: String, val uri: Uri?, val text: String, val savedText: String)
+internal val EditorBackground = Color(0xFF101319)
+internal val EditorPanel = Color(0xFF191E27)
+internal val EditorAccent = Color(0xFF9DB7FF)
+internal val EditorMuted = Color(0xFF8F9AAC)
+internal val EditorInk = Color(0xFFE7EBF3)
 
 class MainActivity : ComponentActivity() {
-    override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState); setContent { EditorApp() } }
+    private val workspace by lazy { ViewModelProvider(this)[EditorWorkspace::class.java] }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+        )
+        setContent { EditorApp(workspace) }
+    }
 }
 
 @Composable
-private fun EditorApp() {
-    val context = LocalContext.current
-    val docs = remember { mutableStateListOf(Doc(0, "untitled.txt", null, "", "")) }
-    var active by remember { mutableIntStateOf(0) }
-    var nextId by remember { mutableIntStateOf(1) }
-    var searchOpen by remember { mutableStateOf(false) }
-    var query by remember { mutableStateOf("") }
-    var replace by remember { mutableStateOf("") }
-    var showSettings by remember { mutableStateOf(false) }
-    var fontSize by remember { mutableFloatStateOf(14f) }
-    var wordWrap by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
-    val current = docs.firstOrNull { it.id == active } ?: docs.first()
-    fun update(newDoc: Doc) { val index = docs.indexOfFirst { it.id == newDoc.id }; if (index >= 0) docs[index] = newDoc }
-    fun saveTo(uri: Uri) {
-        try {
-            context.contentResolver.openOutputStream(uri, "wt")?.use { it.write(current.text.toByteArray(Charsets.UTF_8)) }
-                ?: error("Unable to open output stream")
-            update(current.copy(uri = uri, savedText = current.text))
-        } catch (e: Exception) { error = "Save failed: ${e.message}" }
-    }
+private fun EditorApp(workspace: EditorWorkspace) {
+    val drawer = rememberDrawerState(DrawerValue.Closed)
+    val scope = rememberCoroutineScope()
+    val snackbars = remember { SnackbarHostState() }
+    var showSearch by rememberSaveable { mutableStateOf(false) }
+    var showSettings by rememberSaveable { mutableStateOf(false) }
+    var showLineDialog by rememberSaveable { mutableStateOf(false) }
+    var closingTab by rememberSaveable { mutableIntStateOf(-1) }
+    var namingTab by rememberSaveable { mutableIntStateOf(-1) }
+    var pendingSaveTab by rememberSaveable { mutableIntStateOf(-1) }
+    var pendingSaveName by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingCloseAfterSave by rememberSaveable { mutableStateOf(false) }
+    var jsonAction by remember { mutableStateOf<Boolean?>(null) }
+    val focus = LocalFocusManager.current
     val openFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) try {
-            context.contentResolver.takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-            val content = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() } ?: ""
-            val name = uri.lastPathSegment?.substringAfterLast('/') ?: "file.txt"
-            val id = nextId++; docs.add(Doc(id, name, uri, content, content)); active = id
-        } catch (e: Exception) { error = "Open failed: ${e.message}" }
+        if (uri != null) workspace.open(uri)
     }
-    val createFile = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri -> if (uri != null) saveTo(uri) }
-    val colors = darkColorScheme(primary = Accent, background = Bg, surface = Surface, onBackground = Color(0xFFE7EBF3), onSurface = Color(0xFFE7EBF3))
-    MaterialTheme(colorScheme = colors) {
-        Column(Modifier.fillMaxSize().background(Bg)) {
-            Row(Modifier.fillMaxWidth().height(60.dp).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Outlined.Code, null, tint = Accent)
-                Spacer(Modifier.width(10.dp))
-                Text("kode", style = MaterialTheme.typography.titleLarge, color = Color.White)
-                Text(".", style = MaterialTheme.typography.titleLarge, color = Accent)
-                Spacer(Modifier.weight(1f))
-                IconButton(onClick = { val id = nextId++; docs.add(Doc(id, "untitled$id.txt", null, "", "")); active = id }) { Icon(Icons.Outlined.Add, "New") }
-                IconButton(onClick = { openFile.launch(arrayOf("*/*")) }) { Icon(Icons.Outlined.FolderOpen, "Open") }
-                IconButton(onClick = { if (current.uri != null) saveTo(current.uri) else createFile.launch(current.name) }) { Icon(Icons.Outlined.Save, "Save") }
-                IconButton(onClick = { showSettings = true }) { Icon(Icons.Outlined.Settings, "Settings") }
+    val createFile = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        val id = pendingSaveTab
+        val name = pendingSaveName
+        val closeAfter = pendingCloseAfterSave
+        pendingSaveTab = -1
+        pendingSaveName = null
+        pendingCloseAfterSave = false
+        if (result.resultCode == Activity.RESULT_OK && id != -1) {
+            result.data?.data?.let { workspace.save(id, it, closeAfter, name) }
+        }
+    }
+    val fileActionsEnabled = !workspace.busy && pendingSaveTab == -1
+
+    fun save(document: EditorDocument, copy: Boolean = false, closeAfter: Boolean = false) {
+        if (!fileActionsEnabled) return
+        val uri = document.uri
+        if (uri != null && !copy) {
+            workspace.save(document.id, uri, closeAfter)
+        } else {
+            namingTab = document.id
+            pendingCloseAfterSave = closeAfter
+        }
+    }
+
+    fun showMessage(message: String) {
+        scope.launch {
+            snackbars.currentSnackbarData?.dismiss()
+            snackbars.showSnackbar(message)
+        }
+    }
+
+    MaterialTheme(
+        colorScheme = darkColorScheme(
+            primary = EditorAccent,
+            background = EditorBackground,
+            surface = EditorPanel,
+            onBackground = EditorInk,
+            onSurface = EditorInk,
+        ),
+    ) {
+        if (workspace.loading) {
+            Box(
+                Modifier.fillMaxSize().background(EditorBackground),
+                contentAlignment = Alignment.Center,
+            ) {
+                CircularProgressIndicator()
             }
-            LazyRow(Modifier.fillMaxWidth().background(Surface)) {
-                items(docs, key = { it.id }) { doc ->
-                    val selected = doc.id == active
-                    Row(Modifier.clickable { active = doc.id }.background(if (selected) Bg else Surface).padding(start = 14.dp, end = 6.dp, top = 12.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(doc.name + if (doc.text != doc.savedText) " •" else "", color = if (selected) Accent else Muted, maxLines = 1, fontSize = 12.sp)
-                        IconButton(onClick = { if (docs.size > 1) { docs.remove(doc); if (active == doc.id) active = docs.first().id } }, modifier = Modifier.size(28.dp)) { Icon(Icons.Outlined.Close, "Close tab", modifier = Modifier.size(15.dp), tint = Muted) }
+            return@MaterialTheme
+        }
+
+        val current = workspace.active
+        BackHandler(drawer.isOpen) { scope.launch { drawer.close() } }
+        ModalNavigationDrawer(
+            drawerState = drawer,
+            gesturesEnabled = drawer.isOpen,
+            drawerContent = {
+                EditorDrawer(
+                    documents = workspace.documents,
+                    activeId = current.id,
+                    recent = workspace.recentFiles,
+                    fileActionsEnabled = fileActionsEnabled,
+                    onClose = { scope.launch { drawer.close() } },
+                    onNew = {
+                        workspace.newDocument()
+                        scope.launch { drawer.close() }
+                    },
+                    onOpen = {
+                        scope.launch { drawer.close() }
+                        openFile.launch(arrayOf("*/*"))
+                    },
+                    onSaveAs = {
+                        scope.launch { drawer.close() }
+                        save(current, copy = true)
+                    },
+                    onSelectTab = {
+                        workspace.select(it)
+                        scope.launch { drawer.close() }
+                    },
+                    onRecent = {
+                        workspace.open(it.uri, it.name)
+                        scope.launch { drawer.close() }
+                    },
+                    onGoToLine = {
+                        showLineDialog = true
+                        scope.launch { drawer.close() }
+                    },
+                    onValidateJson = {
+                        jsonAction = false
+                        scope.launch { drawer.close() }
+                    },
+                    onFormatJson = {
+                        jsonAction = true
+                        scope.launch { drawer.close() }
+                    },
+                    onSettings = {
+                        showSettings = true
+                        scope.launch { drawer.close() }
+                    },
+                )
+            },
+        ) {
+            CompositionLocalProvider(LocalContentColor provides EditorInk) {
+                Box(Modifier.fillMaxSize().background(EditorBackground).safeDrawingPadding()) {
+                    Column(Modifier.fillMaxSize()) {
+                        EditorToolbar(
+                            document = current,
+                            searchOpen = showSearch,
+                            fileActionsEnabled = fileActionsEnabled,
+                            onMenu = {
+                                focus.clearFocus()
+                                scope.launch { drawer.open() }
+                            },
+                            onSave = { save(current) },
+                            onSearch = {
+                                showSearch = !showSearch
+                                if (!showSearch) focus.clearFocus()
+                            },
+                        )
+                        EditorTabs(
+                            documents = workspace.documents,
+                            activeId = current.id,
+                            onSelect = {
+                                focus.clearFocus()
+                                workspace.select(it)
+                            },
+                            onClose = { document ->
+                                if (document.modified) closingTab = document.id else workspace.close(document.id)
+                            },
+                        )
+                        key(current.id) {
+                            DocumentEditor(
+                                document = current,
+                                workspace = workspace,
+                                showSearch = showSearch,
+                                showLineDialog = showLineDialog,
+                                jsonAction = jsonAction,
+                                onShowLineDialog = { showLineDialog = true },
+                                onDismissLineDialog = { showLineDialog = false },
+                                onJsonHandled = { jsonAction = null },
+                                onMessage = ::showMessage,
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
                     }
+                    SnackbarHost(snackbars, Modifier.align(Alignment.BottomCenter))
                 }
-            }
-            Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("EDITOR", fontSize = 10.sp, color = Muted, letterSpacing = 2.sp)
-                Spacer(Modifier.weight(1f))
-                IconButton(onClick = { searchOpen = !searchOpen }, modifier = Modifier.size(32.dp)) { Icon(Icons.Outlined.Search, "Find", tint = Muted) }
-                Text("UTF-8", fontSize = 11.sp, color = Muted)
-            }
-            if (searchOpen) {
-                OutlinedTextField(query, { query = it }, label = { Text("Find") }, singleLine = true, modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp))
-                OutlinedTextField(replace, { replace = it }, label = { Text("Replace with") }, singleLine = true, modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp))
-                TextButton(onClick = { if (query.isNotEmpty()) update(current.copy(text = current.text.replace(query, replace))) }) { Text("Replace all") }
-            }
-            val scroll = rememberScrollState()
-            val lineCount = current.text.count { it == '\n' } + 1
-            Row(Modifier.weight(1f).fillMaxWidth().horizontalScroll(rememberScrollState()).verticalScroll(scroll).padding(12.dp)) {
-                Column(Modifier.width(38.dp), horizontalAlignment = Alignment.End) {
-                    for (line in 1..lineCount) Text("$line", fontSize = fontSize.sp, fontFamily = FontFamily.Monospace, lineHeight = (fontSize * 1.55f).sp, color = Muted)
-                }
-                Spacer(Modifier.width(12.dp))
-                BasicTextField(value = current.text, onValueChange = { update(current.copy(text = it)) }, modifier = Modifier.widthIn(min = 300.dp).fillMaxWidth(), textStyle = TextStyle(color = Color(0xFFE7EBF3), fontFamily = FontFamily.Monospace, fontSize = fontSize.sp, lineHeight = (fontSize * 1.55f).sp), cursorBrush = androidx.compose.ui.graphics.SolidColor(Accent), keyboardOptions = KeyboardOptions(autoCorrectEnabled = false), decorationBox = { inner -> Box { if (current.text.isEmpty()) Text("Start typing or open a file…", color = Muted, fontFamily = FontFamily.Monospace, fontSize = fontSize.sp); inner() } })
-            }
-            Row(Modifier.fillMaxWidth().background(Surface).padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("${current.name.substringAfterLast('.', "TXT").uppercase()}  •  $lineCount lines", fontSize = 11.sp, color = Accent)
-                Spacer(Modifier.weight(1f))
-                Text(if (current.text != current.savedText) "UNSAVED" else "SAVED", fontSize = 10.sp, color = Muted)
             }
         }
-        if (showSettings) AlertDialog(onDismissRequest = { showSettings = false }, title = { Text("Editor settings") }, text = { Column { Text("Font size: ${fontSize.toInt()} sp"); Slider(value = fontSize, onValueChange = { fontSize = it }, valueRange = 11f..22f); Text("UTF-8 • LF (default)", color = Muted) } }, confirmButton = { TextButton(onClick = { showSettings = false }) { Text("Done") } })
-        if (error != null) AlertDialog(onDismissRequest = { error = null }, title = { Text("File error") }, text = { Text(error ?: "") }, confirmButton = { TextButton(onClick = { error = null }) { Text("OK") } })
+
+        val toClose = workspace.documents.firstOrNull { it.id == closingTab }
+        if (toClose != null) {
+            AlertDialog(
+                onDismissRequest = { closingTab = -1 },
+                title = { Text("Save changes?") },
+                text = { Text("Save your changes to ${toClose.name} before closing this tab.") },
+                confirmButton = {
+                    TextButton(
+                        enabled = fileActionsEnabled,
+                        onClick = {
+                            closingTab = -1
+                            save(toClose, closeAfter = true)
+                        },
+                    ) { Text("Save") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { closingTab = -1 }) { Text("Cancel") }
+                    TextButton(onClick = {
+                        closingTab = -1
+                        workspace.close(toClose.id)
+                    }) { Text("Discard") }
+                },
+            )
+        }
+        workspace.documents.firstOrNull { it.id == namingTab }?.let { document ->
+            SaveNameDialog(
+                document.name,
+                onClose = {
+                    namingTab = -1
+                    pendingCloseAfterSave = false
+                },
+                onChooseLocation = { name ->
+                    namingTab = -1
+                    pendingSaveTab = document.id
+                    pendingSaveName = name
+                    val extension = name.substringAfterLast('.', "").lowercase()
+                    val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension)
+                    createFile.launch(
+                        Intent(Intent.ACTION_CREATE_DOCUMENT)
+                            .addCategory(Intent.CATEGORY_OPENABLE)
+                            .setType(mime ?: "application/octet-stream")
+                            .putExtra(Intent.EXTRA_TITLE, name),
+                    )
+                },
+            )
+        }
+        if (showSettings) {
+            SettingsDialog(workspace.settings, workspace::updateSettings) { showSettings = false }
+        }
+        workspace.error?.let { message ->
+            AlertDialog(
+                onDismissRequest = workspace::dismissError,
+                title = { Text("Editor error") },
+                text = { Text(message) },
+                confirmButton = { TextButton(onClick = workspace::dismissError) { Text("OK") } },
+            )
+        }
+    }
+}
+
+@Composable
+private fun DocumentEditor(
+    document: EditorDocument,
+    workspace: EditorWorkspace,
+    showSearch: Boolean,
+    showLineDialog: Boolean,
+    jsonAction: Boolean?,
+    onShowLineDialog: () -> Unit,
+    onDismissLineDialog: () -> Unit,
+    onJsonHandled: () -> Unit,
+    onMessage: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val value = document.value
+    val starts = remember(value.text) { lineStarts(value.text) }
+    var query by rememberSaveable { mutableStateOf("") }
+    var replacement by rememberSaveable { mutableStateOf("") }
+    var matchAnchor by rememberSaveable { mutableIntStateOf(-1) }
+    var jump by remember { mutableStateOf<EditorJump?>(EditorJump(value.selection.end)) }
+    var jsonError by remember { mutableStateOf<JsonSyntaxError?>(null) }
+    val matches = remember(showSearch, value.text, query) {
+        if (showSearch) findMatches(value.text, query) else emptyList()
+    }
+    val matchIndex = remember(matches, matchAnchor) {
+        matches.indexOfFirst { it.start >= matchAnchor }.coerceAtLeast(0)
+    }
+    val transformation = remember(document.syntax, matches, matchIndex) {
+        if (document.syntax == Syntax.Plain && matches.isEmpty()) {
+            VisualTransformation.None
+        } else {
+            EditorHighlighting(document.syntax, matches, matchIndex)
+        }
+    }
+
+    fun moveCursor(offset: Int) {
+        workspace.edit(document, document.value.withCursor(offset))
+        jump = EditorJump(offset)
+    }
+
+    fun navigateMatch(step: Int) {
+        if (matches.isEmpty()) return
+        val index = (matchIndex + step + matches.size) % matches.size
+        matchAnchor = matches[index].start
+        jump = EditorJump(matchAnchor)
+    }
+
+    fun undo() {
+        workspace.undo(document)
+        jump = EditorJump(document.value.selection.end)
+    }
+
+    fun redo() {
+        workspace.redo(document)
+        jump = EditorJump(document.value.selection.end)
+    }
+
+    LaunchedEffect(jsonAction) {
+        if (jsonAction != null) {
+            try {
+                if (jsonAction) {
+                    val formatted = formatJson(value.text)
+                    val caret = value.selection.end.coerceAtMost(formatted.length)
+                    workspace.edit(document, TextFieldValue(formatted, TextRange(caret)), atomic = true)
+                    jump = EditorJump(caret)
+                    onMessage("JSON formatted.")
+                } else {
+                    validateJson(value.text)
+                    onMessage("JSON is valid.")
+                }
+            } catch (invalid: JsonSyntaxError) {
+                jsonError = invalid
+            } finally {
+                onJsonHandled()
+            }
+        }
+    }
+
+    Column(modifier) {
+        EditingControls(
+            document = document,
+            wordWrap = workspace.settings.wordWrap,
+            onUndo = ::undo,
+            onRedo = ::redo,
+            onWrap = {
+                workspace.updateSettings(workspace.settings.copy(wordWrap = !workspace.settings.wordWrap))
+                jump = EditorJump(document.value.selection.end)
+            },
+            onSyntax = { workspace.setSyntax(document, it) },
+        )
+        if (showSearch) {
+            SearchPanel(
+                query = query,
+                replacement = replacement,
+                matchIndex = matchIndex,
+                matchCount = matches.size,
+                onQuery = {
+                    query = it
+                    matchAnchor = value.selection.end
+                    val next = findMatches(value.text, it)
+                    val match = next.firstOrNull { candidate -> candidate.start >= matchAnchor } ?: next.firstOrNull()
+                    if (match != null) jump = EditorJump(match.start)
+                },
+                onReplacement = { replacement = it },
+                onPrevious = { navigateMatch(-1) },
+                onNext = { navigateMatch(1) },
+                onReplaceOne = {
+                    val match = matches.getOrNull(matchIndex)
+                    if (match != null) {
+                        val text = value.text.replaceRange(match.start, match.end, replacement)
+                        matchAnchor = match.start + replacement.length
+                        val next = findMatches(text, query)
+                        val nextMatch = next.firstOrNull { it.start >= matchAnchor } ?: next.firstOrNull()
+                        workspace.edit(document, TextFieldValue(text, TextRange(matchAnchor)), atomic = true)
+                        jump = EditorJump(nextMatch?.start ?: matchAnchor)
+                    }
+                },
+                onReplaceAll = {
+                    if (matches.isNotEmpty()) {
+                        val text = value.text.replace(query, replacement)
+                        val caret = value.selection.end.coerceAtMost(text.length)
+                        workspace.edit(document, TextFieldValue(text, TextRange(caret)), atomic = true)
+                        jump = EditorJump(caret)
+                        onMessage(if (matches.size == 1) "Replaced 1 match." else "Replaced ${matches.size} matches.")
+                    }
+                },
+            )
+        }
+        EditorSurface(
+            value = value,
+            settings = workspace.settings,
+            starts = starts,
+            transformation = transformation,
+            jump = jump,
+            onJumpHandled = { if (jump === it) jump = null },
+            onValueChange = { workspace.edit(document, it) },
+            onUndo = ::undo,
+            onRedo = ::redo,
+            modifier = Modifier.weight(1f),
+        )
+        EditorStatus(document, starts, onShowLineDialog)
+    }
+
+    if (showLineDialog) {
+        GoToLineDialog(starts.size, onDismissLineDialog) { line ->
+            moveCursor(starts[line - 1])
+            onDismissLineDialog()
+        }
+    }
+    jsonError?.let { invalid ->
+        val offset = invalid.offset.coerceAtMost(value.text.length)
+        val line = lineIndex(starts, offset)
+        AlertDialog(
+            onDismissRequest = { jsonError = null },
+            title = { Text("Invalid JSON") },
+            text = { Text("Line ${line + 1}, column ${offset - starts[line] + 1}. ${invalid.message}") },
+            confirmButton = {
+                TextButton(onClick = {
+                    jsonError = null
+                    moveCursor(offset)
+                }) { Text("Go to error") }
+            },
+            dismissButton = { TextButton(onClick = { jsonError = null }) { Text("Close") } },
+        )
     }
 }
