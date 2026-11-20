@@ -16,5 +16,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "KodeEditor"
+rootProject.name = "Teksto"
 include(":app")
