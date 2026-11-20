@@ -1,0 +1,19 @@
+# Gradle and Kotlin caches
+.gradle/
+.kotlin/
+
+# Android build output
+build/
+.cxx/
+.externalNativeBuild/
+*.apk
+*.aab
+
+# Local Android SDK and IDE settings
+/local.properties
+/.idea/
+*.iml
+
+# OS metadata
+.DS_Store
+Thumbs.db
