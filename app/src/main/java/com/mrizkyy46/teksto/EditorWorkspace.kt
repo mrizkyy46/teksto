@@ -19,6 +19,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 internal class EditorDocument(
@@ -123,6 +125,7 @@ internal class EditorWorkspace(application: Application) : AndroidViewModel(appl
     private val store = SessionStore(application.noBackupFilesDir)
     private val snapshots = Channel<SessionSnapshot>(Channel.CONFLATED)
     private val ready = CompletableDeferred<Unit>()
+    private val fileOperations = Mutex()
     private val openDocuments = mutableStateListOf<EditorDocument>()
     val documents: List<EditorDocument> get() = openDocuments
 
@@ -242,16 +245,13 @@ internal class EditorWorkspace(application: Application) : AndroidViewModel(appl
     }
 
     fun open(uri: Uri, nameHint: String? = null) {
-        viewModelScope.launch {
-            ready.await()
-            if (busy) return@launch
+        runFileOperation {
             val existing = openDocuments.firstOrNull { it.uri == uri }
             if (existing != null) {
                 addRecent(RecentFile(uri, existing.name))
                 select(existing.id)
-                return@launch
+                return@runFileOperation
             }
-            busy = true
             try {
                 val (file, text) = withContext(Dispatchers.IO) {
                     val text = resolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
@@ -265,21 +265,16 @@ internal class EditorWorkspace(application: Application) : AndroidViewModel(appl
                 select(document.id)
             } catch (failure: Exception) {
                 error = "Couldn’t open the file. ${failure.message.orEmpty()}"
-            } finally {
-                busy = false
             }
         }
     }
 
     fun save(id: Int, uri: Uri, closeAfter: Boolean, nameHint: String? = null) {
-        viewModelScope.launch {
-            ready.await()
-            if (busy) return@launch
-            val document = openDocuments.firstOrNull { it.id == id } ?: return@launch
+        runFileOperation {
+            val document = openDocuments.firstOrNull { it.id == id } ?: return@runFileOperation
             val text = document.value.text
             val sameFile = uri == document.uri
             val name = document.name
-            busy = true
             try {
                 val file = withContext(Dispatchers.IO) {
                     resolver.openOutputStream(uri, "wt")?.bufferedWriter(Charsets.UTF_8)?.use { it.write(text) }
@@ -292,8 +287,20 @@ internal class EditorWorkspace(application: Application) : AndroidViewModel(appl
                 if (closeAfter && !document.modified) close(id) else persist()
             } catch (failure: Exception) {
                 error = "Couldn’t save the file. ${failure.message.orEmpty()}"
-            } finally {
-                busy = false
+            }
+        }
+    }
+
+    private fun runFileOperation(operation: suspend () -> Unit) {
+        viewModelScope.launch {
+            ready.await()
+            fileOperations.withLock {
+                busy = true
+                try {
+                    operation()
+                } finally {
+                    busy = false
+                }
             }
         }
     }

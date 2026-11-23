@@ -5,6 +5,7 @@ Teksto adalah editor teks untuk Android yang dibuat dengan Kotlin, Jetpack Compo
 ## Fitur
 
 - Buat, buka, dan simpan berkas teks UTF-8. Gunakan **Save as** untuk menyimpan salinan dengan nama atau lokasi baru.
+- Pilih **Teksto** dari menu **Buka dengan** di pengelola berkas Android untuk membuka TXT, Markdown, HTML, JSON, XML, dan format teks lain langsung di editor.
 - Buka menu samping untuk mengakses tab, berkas terbaru, dan pengaturan editor.
 - Lanjutkan sesi sebelumnya dengan tab, posisi kursor, dan draf yang dipulihkan. Tanda titik pada tab menandai perubahan yang belum disimpan. Saat menutup tab tersebut, pilih **Save**, **Discard**, atau **Cancel**.
 - Temukan teks di dokumen aktif dengan sorotan, penghitung hasil, serta tombol sebelum dan sesudah. Gunakan **Replace one** atau **Replace all** untuk mengganti teks.

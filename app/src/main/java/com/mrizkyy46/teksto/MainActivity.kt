@@ -1,6 +1,7 @@
 package com.mrizkyy46.teksto
 
 import android.app.Activity
+import android.content.ContentResolver
 import android.content.Intent
 import android.os.Bundle
 import android.webkit.MimeTypeMap
@@ -67,6 +68,18 @@ class MainActivity : ComponentActivity() {
             navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
         )
         setContent { EditorApp(workspace) }
+        if (savedInstanceState == null) openViewedFile(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        openViewedFile(intent)
+    }
+
+    private fun openViewedFile(intent: Intent) {
+        if (intent.action != Intent.ACTION_VIEW) return
+        val uri = intent.data ?: return
+        if (uri.scheme == ContentResolver.SCHEME_CONTENT) workspace.open(uri)
     }
 }
 
