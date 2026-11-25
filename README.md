@@ -23,3 +23,7 @@ Teksto menyimpan draf pemulihan di penyimpanan aplikasi. Ketuk **Save** untuk me
 1. Buka folder proyek di Android Studio, lalu instal Android SDK 35 lewat **SDK Manager**.
 2. Di pengaturan Gradle Android Studio, pilih JDK 17 dan instalasi lokal Gradle 8.9 karena proyek ini belum menyertakan Gradle Wrapper. [Kompatibilitas Android Gradle Plugin 8.7](https://developer.android.com/build/releases/agp-8-7-0-release-notes#compatibility)
 3. Sinkronkan Gradle, lalu jalankan modul `app` di emulator atau perangkat dengan Android 8.0 (API 26) atau lebih baru.
+
+## Build dan rilis GitHub
+
+Workflow **Android Build** mengunggah APK varian `release` sebagai artifact pada setiap build. Build dari branch dan pull request tidak ditandatangani. Untuk build lokal bertanda tangan, set `ANDROID_SIGNING_KEYSTORE_PATH` ke lokasi file P12 serta set `ANDROID_SIGNING_KEYSTORE_PASSWORD`, `ANDROID_SIGNING_KEY_ALIAS`, dan `ANDROID_SIGNING_KEY_PASSWORD`. Untuk menandatangani APK di GitHub Actions, tambahkan secrets `ANDROID_SIGNING_KEYSTORE_BASE64` (isi file P12 dalam Base64) dan ketiga secrets kredensial di atas. Lalu buat dan push tag versi berawalan `v`, misalnya `v0.1.0`. Workflow akan membuat release dengan catatan otomatis dan melampirkan `app-release.apk` yang ditandatangani.
