@@ -47,6 +47,8 @@ jobs:
           ANDROID_SIGNING_KEY_ALIAS: ${{ secrets.ANDROID_SIGNING_KEY_ALIAS }}
           ANDROID_SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEY_PASSWORD }}
         run: |
+          set -euo pipefail
+
           for secret_name in \
             ANDROID_SIGNING_KEYSTORE_BASE64 \
             ANDROID_SIGNING_KEYSTORE_PASSWORD \
@@ -67,27 +69,60 @@ jobs:
             exit 1
           fi
 
-          echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/teksto-release-key.p12" >> "$GITHUB_ENV"
+          echo "Verifying PKCS12 keystore..."
+
+          keytool -list \
+            -keystore "$RUNNER_TEMP/teksto-release-key.p12" \
+            -storetype PKCS12 \
+            -storepass "$ANDROID_SIGNING_KEYSTORE_PASSWORD" \
+            -alias "$ANDROID_SIGNING_KEY_ALIAS" \
+            > /dev/null
+
+          echo "PKCS12 keystore verified successfully."
 
       - name: Assemble release APK
         env:
+          ANDROID_SIGNING_KEYSTORE_PATH: ${{ runner.temp }}/teksto-release-key.p12
           ANDROID_SIGNING_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEYSTORE_PASSWORD }}
           ANDROID_SIGNING_KEY_ALIAS: ${{ secrets.ANDROID_SIGNING_KEY_ALIAS }}
           ANDROID_SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEY_PASSWORD }}
         run: |
+          set -euo pipefail
+
+          echo "Building release APK..."
+
           gradle --no-daemon :app:assembleRelease
+
+          echo "APK build output:"
+          find app/build/outputs/apk -type f -name "*.apk"
 
       - name: Verify signed APK
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
+          set -euo pipefail
+
           APK="app/build/outputs/apk/release/app-release.apk"
 
           if [ ! -f "$APK" ]; then
             echo "::error::Signed APK not found: $APK"
+            echo "Available APK files:"
+            find app/build/outputs/apk -type f -name "*.apk"
             exit 1
           fi
 
-          $ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -n 1)/apksigner verify --verbose "$APK"
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" \
+            -type f -name apksigner | sort -V | tail -n 1)"
+
+          if [ -z "$APKSIGNER" ]; then
+            echo "::error::apksigner not found"
+            exit 1
+          fi
+
+          echo "Verifying APK signature..."
+
+          "$APKSIGNER" verify --verbose "$APK"
+
+          echo "APK signature verified successfully."
 
       - name: Upload unsigned release APK artifact
         if: github.ref_type != 'tag'
@@ -135,6 +170,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
+
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             echo "Release $GITHUB_REF_NAME already exists."
           else
@@ -147,6 +184,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
+
           gh release upload "$GITHUB_REF_NAME" \
             release/app-release.apk \
             --clobber
