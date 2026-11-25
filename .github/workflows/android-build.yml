@@ -39,13 +39,16 @@ jobs:
           gradle-version: "8.9"
           cache-provider: basic
 
+      # ==========================================
+      # SIGNED BUILD: Only for version tags (v*)
+      # ==========================================
+
       - name: Prepare release signing key
         if: startsWith(github.ref, 'refs/tags/v')
         env:
           ANDROID_SIGNING_KEYSTORE_BASE64: ${{ secrets.ANDROID_SIGNING_KEYSTORE_BASE64 }}
           ANDROID_SIGNING_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEYSTORE_PASSWORD }}
           ANDROID_SIGNING_KEY_ALIAS: ${{ secrets.ANDROID_SIGNING_KEY_ALIAS }}
-          ANDROID_SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEY_PASSWORD }}
         run: |
           set -euo pipefail
 
@@ -55,16 +58,18 @@ jobs:
             ANDROID_SIGNING_KEY_ALIAS \
             ANDROID_SIGNING_KEY_PASSWORD
           do
-            if [ -z "${!secret_name}" ]; then
+            if [ -z "${!secret_name:-}" ]; then
               echo "::error::Missing required Actions secret: $secret_name"
               exit 1
             fi
           done
 
-          printf '%s' "$ANDROID_SIGNING_KEYSTORE_BASE64" \
-            | base64 --decode > "$RUNNER_TEMP/teksto-release-key.p12"
+          KEYSTORE="$RUNNER_TEMP/teksto-release-key.p12"
 
-          if [ ! -s "$RUNNER_TEMP/teksto-release-key.p12" ]; then
+          printf '%s' "$ANDROID_SIGNING_KEYSTORE_BASE64" \
+            | base64 --decode > "$KEYSTORE"
+
+          if [ ! -s "$KEYSTORE" ]; then
             echo "::error::Keystore file is empty or invalid"
             exit 1
           fi
@@ -72,15 +77,18 @@ jobs:
           echo "Verifying PKCS12 keystore..."
 
           keytool -list \
-            -keystore "$RUNNER_TEMP/teksto-release-key.p12" \
+            -keystore "$KEYSTORE" \
             -storetype PKCS12 \
             -storepass "$ANDROID_SIGNING_KEYSTORE_PASSWORD" \
             -alias "$ANDROID_SIGNING_KEY_ALIAS" \
             > /dev/null
 
           echo "PKCS12 keystore verified successfully."
+          echo "Keystore location: $KEYSTORE"
+          ls -lh "$KEYSTORE"
 
-      - name: Assemble release APK
+      - name: Assemble signed release APK
+        if: startsWith(github.ref, 'refs/tags/v')
         env:
           ANDROID_SIGNING_KEYSTORE_PATH: ${{ runner.temp }}/teksto-release-key.p12
           ANDROID_SIGNING_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEYSTORE_PASSWORD }}
@@ -89,12 +97,24 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo "Building release APK..."
+          echo "Checking signing keystore..."
+
+          test -s "$ANDROID_SIGNING_KEYSTORE_PATH" || {
+            echo "::error::Keystore file not found"
+            exit 1
+          }
+
+          echo "Building signed release APK..."
 
           gradle --no-daemon :app:assembleRelease
 
-          echo "APK build output:"
+          echo "Signed APK output:"
           find app/build/outputs/apk -type f -name "*.apk"
+
+          test -f app/build/outputs/apk/release/app-release.apk || {
+            echo "::error::Signed APK was not generated"
+            exit 1
+          }
 
       - name: Verify signed APK
         if: startsWith(github.ref, 'refs/tags/v')
@@ -102,13 +122,6 @@ jobs:
           set -euo pipefail
 
           APK="app/build/outputs/apk/release/app-release.apk"
-
-          if [ ! -f "$APK" ]; then
-            echo "::error::Signed APK not found: $APK"
-            echo "Available APK files:"
-            find app/build/outputs/apk -type f -name "*.apk"
-            exit 1
-          fi
 
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" \
             -type f -name apksigner | sort -V | tail -n 1)"
@@ -118,19 +131,9 @@ jobs:
             exit 1
           fi
 
-          echo "Verifying APK signature..."
-
           "$APKSIGNER" verify --verbose "$APK"
 
-          echo "APK signature verified successfully."
-
-      - name: Upload unsigned release APK artifact
-        if: github.ref_type != 'tag'
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
-        with:
-          name: teksto-release-unsigned
-          path: app/build/outputs/apk/release/app-release-unsigned.apk
-          if-no-files-found: error
+          echo "Signed APK verification successful."
 
       - name: Upload signed release APK artifact
         if: startsWith(github.ref, 'refs/tags/v')
@@ -140,9 +143,37 @@ jobs:
           path: app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
 
+      # ==========================================
+      # UNSIGNED BUILD: Main / Pull Request
+      # ==========================================
+
+      - name: Assemble unsigned release APK
+        if: github.ref_type != 'tag'
+        run: |
+          set -euo pipefail
+
+          echo "Building unsigned release APK..."
+
+          gradle --no-daemon :app:assembleRelease
+
+          echo "Unsigned APK output:"
+          find app/build/outputs/apk -type f -name "*.apk"
+
+      - name: Upload unsigned release APK artifact
+        if: github.ref_type != 'tag'
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: teksto-release-unsigned
+          path: app/build/outputs/apk/release/app-release-unsigned.apk
+          if-no-files-found: error
+
       - name: Remove temporary keystore
         if: always()
         run: rm -f "$RUNNER_TEMP/teksto-release-key.p12"
+
+  # ==========================================
+  # PUBLISH GITHUB RELEASE
+  # ==========================================
 
   release:
     name: Publish GitHub Release
